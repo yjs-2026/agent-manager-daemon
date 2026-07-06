@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>{% block title %}Agent Manager{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="{{ url_for('web.index') }}">Agent Manager</a>
+    {% if session.get('user') %}
+    <nav>
+      <a href="{{ url_for('web.change_password_view') }}">Change password</a>
+      <span class="who">{{ session.get('user') }}</span>
+      <form action="{{ url_for('web.logout') }}" method="post" class="inline">
+        <button type="submit" class="link-btn">Log out</button>
+      </form>
+    </nav>
+    {% endif %}
+  </header>
+
+  <main class="container">
+    {% with msgs = get_flashed_messages(with_categories=true) %}
+      {% if msgs %}
+        <ul class="flashes">
+          {% for category, msg in msgs %}
+            <li class="flash flash-{{ category }}">{{ msg }}</li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+    {% endwith %}
+    {% block body %}{% endblock %}
+  </main>
+</body>
+</html>

@@ -1,0 +1,85 @@
+# agent-manager-daemon runtime configuration
+# This file is read on daemon start. Override any value via env var
+# AGENT_MANAGER_<UPPER_SNAKE_KEY> (e.g. AGENT_MANAGER_BIND_HOST=0.0.0.0).
+
+server:
+  bind_host: "0.0.0.0"        # Web UI + API listen address. 0.0.0.0 = all ifaces.
+  bind_port: 8443              # Web UI + API listen port (8443 = https-friendly).
+  secret_key: "CHANGE-ME-IN-PROD-please-use-a-long-random-string"
+  # Session cookie hardening. With TLS enabled, secure MUST be true so
+  # the browser refuses to send the cookie back over plain HTTP.
+  session_cookie_secure: true
+  session_cookie_httponly: true
+  session_cookie_samesite: "Lax"
+  # Allowed users for web login. Empty = any account present on the system.
+  # Use this when you want to lock web login to a small admin group.
+  web_allowed_users: []
+
+# TLS. The daemon serves HTTPS directly; do NOT put it behind another
+# TLS terminator in production unless you've thought through the
+# implications for session cookies + API tokens.
+tls:
+  enabled: true
+  # "adhoc"  : Flask/Werkzeug generates an ephemeral self-signed cert
+  #            at startup. Browsers will warn every time you visit —
+  #            fine for dev / internal demos, NOT for prod.
+  # "explicit": use certfile + keyfile from disk (Let's Encrypt, etc.).
+  mode: "adhoc"
+  certfile: ""                 # required when mode=explicit
+  keyfile: ""                  # required when mode=explicit
+  # Minimum TLS version. Anything below 1.2 is rejected.
+  min_version: "TLSv1.2"
+
+# API tokens used by external callers (CI/CD, control plane, ...) to
+# invoke /api/v1/* endpoints. Keep this list short and rotate regularly.
+# Tokens here are SHA-256 hex digests of the *real* bearer tokens; the
+# daemon only ever stores hashes, never plaintext.
+api:
+  tokens:
+    # sha256("dev-api-token-please-change")
+    - "5f1c1e3b1c0b4e9e8e7d6c5b4a39281d6f1e2c3b4a5968778695a4b3c2d1e0fa"
+  # If true, require tokens on every /api/v1/* request. Default true.
+  require_token: true
+
+# Agent upgrade subsystem.
+upgrade:
+  # Local working directory where upgrade artifacts are staged.
+  # Created if missing.
+  work_dir: "/var/lib/agent-manager/work"
+  # Final install dir for the agent. Symlink-current pattern:
+  #   <install_root>/current  -> <install_root>/releases/<version>
+  install_root: "/opt/myagent"
+  # Backup retention (most recent N releases kept).
+  keep_releases: 3
+  # systemd unit that gets restarted after a successful upgrade.
+  # Set to "" to skip the restart step.
+  systemd_unit: "myagent.service"
+  # FTP source. The daemon downloads the file from ftp_url and stores
+  # it as <filename> inside work_dir.
+  ftp:
+    url: "ftp://ftp.example.com/agents/myagent"
+    # Username/password are read from env if set, otherwise fall back to "anonymous".
+    username_env: "AGENT_MANAGER_FTP_USER"
+    password_env: "AGENT_MANAGER_FTP_PASS"
+    # Connection timeout (seconds).
+    timeout: 60
+    # If true, verify TLS (for ftps://). Ignored for plain ftp://.
+    verify_tls: true
+  # Supported archive formats. The daemon inspects filename extension
+  # and picks the right unpacker.
+  archive_formats:
+    - ".tar.gz"
+    - ".tgz"
+    - ".tar.bz2"
+    - ".tar.xz"
+    - ".zip"
+  # Post-install hook script template. Variables: {install_dir}, {version}, {work_dir}
+  # Skipped if empty. Must be executable. Runs as root (the daemon itself
+  # must run as root for chpasswd / systemd to work).
+  post_install_hook: ""
+
+# Logging.
+logging:
+  level: "INFO"                 # DEBUG / INFO / WARNING / ERROR
+  file: ""                      # e.g. /var/log/agent-manager/daemon.log; empty = stderr
+  format: "%(asctime)s %(levelname)s %(name)s %(message)s"

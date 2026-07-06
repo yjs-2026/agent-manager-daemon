@@ -1,0 +1,41 @@
+[Unit]
+Description=Agent Manager Daemon (HTTPS web password self-service + agent upgrade API)
+Documentation=https://github.com/yjs-2026/agent-manager-daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+
+# Listen on all interfaces (0.0.0.0) over HTTPS by default. Override
+# AGENT_MANAGER_SERVER__BIND_HOST or AGENT_MANAGER_SERVER__BIND_PORT
+# via an Environment= line below if you need to scope this down.
+Environment="AGENT_MANAGER_CONFIG=/etc/agent-manager/config.yaml"
+WorkingDirectory=/opt/agent-manager-daemon
+ExecStart=/opt/agent-manager-daemon/.venv/bin/python -m agent_manager
+
+# Hardening: we need /etc/shadow + chpasswd + systemctl, so a tight
+# sandbox is impossible. Restrict what we *don't* need.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/agent-manager /opt/myagent /opt/agent-manager-daemon /var/log/agent-manager
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=true
+RestrictRealtime=true
+SystemCallArchitectures=native
+LockPersonality=true
+MemoryDenyWriteExecute=true
+
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=15
+
+[Install]
+WantedBy=multi-user.target
