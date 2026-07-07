@@ -8,6 +8,7 @@ the on-disk history; subsequent calls reuse the same instance via
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Optional
 
 from flask import Flask
@@ -20,10 +21,27 @@ from .web import bp as web_bp
 
 def create_app(config: Optional[Config] = None) -> Flask:
     cfg = config or Config.load()
+    # Resolve templates/ and static/. Two cases, in priority order:
+    #
+    #   1. Next to this file (non-editable install):
+    #        <prefix>/.venv/lib/python3.12/site-packages/agent_manager/
+    #      install.sh copies templates/ and static/ here so the daemon
+    #      can use a stable per-package path even when systemd sets
+    #      WorkingDirectory= somewhere unrelated.
+    #
+    #   2. Relative to the source tree (editable dev install):
+    #        src/agent_manager/app.py
+    #        ../../templates  +  ../../static
+    pkg_dir = Path(__file__).resolve().parent
+    candidates_t = [pkg_dir / "templates", pkg_dir.parent.parent / "templates"]
+    candidates_s = [pkg_dir / "static", pkg_dir.parent.parent / "static"]
+    template_dir = next((p for p in candidates_t if p.is_dir()), candidates_t[0])
+    static_dir = next((p for p in candidates_s if p.is_dir()), candidates_s[0])
+
     app = Flask(
         __name__,
-        template_folder="../../templates",
-        static_folder="../../static",
+        template_folder=str(template_dir),
+        static_folder=str(static_dir),
     )
     app.config.update(cfg.as_flask_config())
 

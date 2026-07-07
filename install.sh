@@ -191,6 +191,7 @@ create_venv() {
         # the daemon finds the module even if $INSTALL_ROOT is later
         # moved or the .pth file paths go stale.
         run "$UV_BIN" pip install --python "$venv/bin/python" "$SCRIPT_DIR"
+        _stage_web_assets "$venv"
     elif [[ -n "$PY_BIN" ]]; then
         log "creating venv with $PY_BIN ($PYTHON_VERSION)"
         run mkdir -p "$INSTALL_ROOT"
@@ -200,6 +201,7 @@ create_venv() {
         log "installing project + deps into venv (non-editable)"
         run "$venv/bin/pip" install --upgrade pip
         run "$venv/bin/pip" install "$SCRIPT_DIR"
+        _stage_web_assets "$venv"
     else
         die "neither uv nor python${PYTHON_VERSION} found on this host; install one of them and re-run"
     fi
@@ -211,6 +213,22 @@ install_system_python() {
     "$PY_BIN" -c "import sys; assert sys.version_info[:2] == (3,12), 'need 3.12, got '+sys.version" \
         || die "system python is not 3.12 — drop --system-python and use a venv"
     run "$PY_BIN" -m pip install --break-system-packages "$SCRIPT_DIR"
+}
+
+
+# Copy templates/ and static/ into the venv's
+# site-packages/agent_manager/ so the daemon can find them with a
+# stable per-package relative path (../templates, ../static). Without
+# this, the daemon's WorkingDirectory-based relative paths fail when
+# systemd sets a different cwd, and every render raises
+# TemplateNotFound.
+_stage_web_assets() {
+    local venv="$1"
+    local pkg_dir="${venv}/lib/python${PYTHON_VERSION}/site-packages/agent_manager"
+    log "staging templates/ + static/ into ${pkg_dir}"
+    run mkdir -p "${pkg_dir}/templates" "${pkg_dir}/static"
+    run cp -r "${SCRIPT_DIR}/templates/." "${pkg_dir}/templates/"
+    run cp -r "${SCRIPT_DIR}/static/." "${pkg_dir}/static/"
 }
 
 # ---------------------------------------------------------------------------
