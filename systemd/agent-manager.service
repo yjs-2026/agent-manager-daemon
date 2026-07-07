@@ -24,7 +24,13 @@ LogsDirectory=agent-manager
 # via an Environment= line below if you need to scope this down.
 Environment="AGENT_MANAGER_CONFIG=/etc/agent-manager/config.yaml"
 WorkingDirectory=/opt/agent-manager-daemon
-ExecStart=/opt/agent-manager-daemon/.venv/bin/python -m agent_manager
+# Use the console_script entry point (set up by [project.scripts] in
+# pyproject.toml) instead of `python -m agent_manager`. The wrapper
+# script does `from agent_manager.__main__ import main` via an
+# absolute import, which is more robust than `python -m` because it
+# doesn't depend on sys.path ordering when systemd sets a stripped
+# environment or an unusual WorkingDirectory.
+ExecStart=/opt/agent-manager-daemon/.venv/bin/agent-manager
 
 # Hardening: we need /etc/shadow + chpasswd + systemctl, so a tight
 # sandbox is impossible. Restrict what we *don't* need.
