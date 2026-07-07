@@ -59,20 +59,22 @@ def test_web_change_password_requires_login(client):
     assert "/login" in r.headers["Location"]
 
 
-def test_web_change_password_happy(client, monkeypatch):
+def test_web_change_password_happy(client, monkeypatch, tmp_path):
     install = __import__("tests.conftest", fromlist=["install_fake_shadow"]).install_fake_shadow
     install(monkeypatch, {"alice": "hunter2"})
     _login(client, "alice", "hunter2")
 
-    # Patch chpasswd to record the call.
-    seen = {}
-
-    def fake_run(cmd, input=None, capture_output=False, check=False):
-        seen["input"] = input
-        import subprocess
-        return subprocess.CompletedProcess(cmd, 0, b"", b"")
-
-    monkeypatch.setattr(auth_mod.subprocess, "run", fake_run)
+    # The new change_password path writes to /etc/shadow directly.
+    # Point it at a tmp file so the test is hermetic.
+    shadow_file = tmp_path / "shadow"
+    import crypt as _crypt
+    shadow_file.write_text(
+        f"alice:{_crypt.crypt('hunter2', '$6$testsalt$')}:19000:0:99999:7:::\n"
+    )
+    lock_file = tmp_path / ".pwd.lock"
+    lock_file.write_text("")
+    monkeypatch.setattr(auth_mod, "SHADOW_PATH", str(shadow_file))
+    monkeypatch.setattr(auth_mod, "LOCK_PATH", str(lock_file))
 
     r = client.post(
         "/account/password",
@@ -85,7 +87,7 @@ def test_web_change_password_happy(client, monkeypatch):
     )
     assert r.status_code == 200
     assert b"Password updated successfully" in r.data
-    assert b"new-secret-1234" in seen["input"]
+    assert _crypt.crypt("new-secret-1234", "$6$testsalt$")[:20] in shadow_file.read_text()
 
 
 def test_web_change_password_wrong_current(client, monkeypatch):
