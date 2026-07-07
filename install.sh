@@ -44,6 +44,40 @@ UNINSTALL=0
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 # ---------------------------------------------------------------------------
+# Tool resolution (handles sudo's stripped PATH)
+#
+# `sudo` defaults to a `secure_path` that does NOT include
+# $HOME/.local/bin — so `uv` installed via the official installer is
+# invisible to the sudo-ed script. We resolve common install locations
+# up front and use absolute paths everywhere we shell out.
+# ---------------------------------------------------------------------------
+
+resolve_tool() {
+    local tool="$1"
+    shift
+    for dir in "$@"; do
+        if [[ -x "$dir/$tool" ]]; then
+            printf '%s\n' "$dir/$tool"
+            return 0
+        fi
+    done
+    # Fall back to whatever's on the current PATH (works for root,
+    # in CI containers, and when sudo's PATH is unmodified).
+    command -v "$tool" 2>/dev/null || return 1
+}
+
+UV_BIN="$(resolve_tool uv \
+    "${HOME}/.local/bin" \
+    "${HOME}/.cargo/bin" \
+    /usr/local/bin /usr/bin /opt/agent-manager-daemon/.venv/bin)" \
+    || UV_BIN=""
+
+PY_BIN="$(resolve_tool "python${PYTHON_VERSION}" \
+    /usr/local/bin /usr/bin /opt/agent-manager-daemon/.venv/bin)" \
+    || PY_BIN=""
+[[ -z "$PY_BIN" ]] && PY_BIN="$(resolve_tool python3 /usr/local/bin /usr/bin)" || true
+
+# ---------------------------------------------------------------------------
 # Logging helpers
 # ---------------------------------------------------------------------------
 
@@ -120,8 +154,11 @@ preflight() {
     fi
 
     if [[ "$WITH_VENV" -eq 1 ]]; then
-        if ! command -v uv >/dev/null; then
-            warn "uv not found; will try system python with venv (you may need python${PYTHON_VERSION}-venv installed)"
+        if [[ -z "$UV_BIN" ]]; then
+            warn "uv not found in common locations; will try system python with venv (you may need python${PYTHON_VERSION}-venv installed)"
+            if [[ -z "$PY_BIN" ]]; then
+                warn "no python${PYTHON_VERSION} on PATH either — set PY_BIN or install one"
+            fi
         fi
     fi
 
@@ -136,36 +173,36 @@ create_venv() {
     local venv="${INSTALL_ROOT}/.venv"
 
     if [[ -d "$venv" ]]; then
-        log "venv already exists at $venv (reusing; pass --force to rebuild)"
+        log "venv already exists at $venv (reusing)"
         return
     fi
 
-    if command -v uv >/dev/null; then
-        log "creating venv with uv ($PYTHON_VERSION)"
+    if [[ -n "$UV_BIN" ]]; then
+        log "creating venv with uv ($PYTHON_VERSION) at $UV_BIN"
         run mkdir -p "$INSTALL_ROOT"
-        run uv venv --python "$PYTHON_VERSION" "$venv"
+        run "$UV_BIN" venv --python "$PYTHON_VERSION" "$venv"
         log "installing project + deps into venv"
-        run uv pip install --python "$venv/bin/python" -e "$SCRIPT_DIR"
-    else
-        log "creating venv with system python ($PYTHON_VERSION)"
+        run "$UV_BIN" pip install --python "$venv/bin/python" -e "$SCRIPT_DIR"
+    elif [[ -n "$PY_BIN" ]]; then
+        log "creating venv with $PY_BIN ($PYTHON_VERSION)"
         run mkdir -p "$INSTALL_ROOT"
-        if ! run "${PYTHON_VERSION}" -m venv "$venv"; then
-            die "venv creation failed — install ${PYTHON_VERSION} (apt: python${PYTHON_VERSION}-venv) or install uv first"
+        if ! run "$PY_BIN" -m venv "$venv"; then
+            die "venv creation failed — install ${PYTHON_VERSION}-venv (apt: python${PYTHON_VERSION}-venv), install uv first, or pass --system-python"
         fi
         log "installing project + deps into venv"
         run "$venv/bin/pip" install --upgrade pip
         run "$venv/bin/pip" install -e "$SCRIPT_DIR"
+    else
+        die "neither uv nor python${PYTHON_VERSION} found on this host; install one of them and re-run"
     fi
 }
 
 install_system_python() {
-    local py
-    py="$(command -v "python${PYTHON_VERSION}" || command -v python3 || true)"
-    [[ -n "$py" ]] || die "no system python found; install ${PYTHON_VERSION} or drop --system-python"
-    log "using system python at $py (no venv)"
-    "$py" -c "import sys; assert sys.version_info[:2] == (3,12), 'need 3.12, got '+sys.version" \
+    [[ -n "$PY_BIN" ]] || die "no system python found; install ${PYTHON_VERSION} or drop --system-python"
+    log "using system python at $PY_BIN (no venv)"
+    "$PY_BIN" -c "import sys; assert sys.version_info[:2] == (3,12), 'need 3.12, got '+sys.version" \
         || die "system python is not 3.12 — drop --system-python and use a venv"
-    run "$py" -m pip install --break-system-packages -e "$SCRIPT_DIR"
+    run "$PY_BIN" -m pip install --break-system-packages -e "$SCRIPT_DIR"
 }
 
 # ---------------------------------------------------------------------------
