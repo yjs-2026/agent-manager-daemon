@@ -33,6 +33,10 @@ UNIT_NAME="agent-manager.service"
 UNIT_SRC_PATH="systemd/${UNIT_NAME}"
 WORK_DIR="/var/lib/agent-manager"
 LOG_DIR="/var/log/agent-manager"
+# Where the agent will be installed at runtime (config.yaml's
+# upgrade.install_root). We pre-create it so the systemd unit's
+# mount namespace setup doesn't fail with "No such file or directory".
+AGENT_INSTALL_ROOT="/opt/myagent"
 PYTHON_VERSION="3.12"
 RUN_AS_USER="root"
 WITH_SYSTEMD=1
@@ -122,6 +126,7 @@ while [[ $# -gt 0 ]]; do
         --config-dir)          CONFIG_DIR="$2"; CONFIG_FILE="${CONFIG_DIR}/config.yaml"; shift ;;
         --work-dir)            WORK_DIR="$2"; shift ;;
         --log-dir)             LOG_DIR="$2"; shift ;;
+        --agent-install-root)  AGENT_INSTALL_ROOT="$2"; shift ;;
         --system-python)       WITH_VENV=0 ;;
         --skip-systemd)        WITH_SYSTEMD=0 ;;
         --force-config)        FORCE_CONFIG=1 ;;
@@ -257,6 +262,24 @@ stage_files() {
             log "sudo -n unavailable; will create $WORK_DIR/$LOG_DIR at runtime"
     fi
 
+    # Pre-create the agent install_root too. systemd's mount-namespace
+    # setup refuses to start the unit if any directory in the namespace
+    # doesn't exist, and ReadWritePaths=/opt/myagent in the unit
+    # silently fails on first boot before any upgrade has happened.
+    # config.yaml's default install_root is /opt/myagent; we make
+    # that path exist here so the unit starts clean.
+    log "creating agent install_root at $AGENT_INSTALL_ROOT"
+    if [[ "$(id -u)" -eq 0 ]]; then
+        run mkdir -p "$AGENT_INSTALL_ROOT/releases"
+        run chown -R "${RUN_AS_USER}:${RUN_AS_USER}" "$AGENT_INSTALL_ROOT"
+    elif [[ "$WITH_SYSTEMD" -eq 0 ]]; then
+        run mkdir -p "$AGENT_INSTALL_ROOT/releases" || \
+            warn "could not pre-create $AGENT_INSTALL_ROOT as $(id -un)"
+    else
+        run sudo -n mkdir -p "$AGENT_INSTALL_ROOT/releases" || \
+            warn "could not pre-create $AGENT_INSTALL_ROOT (sudo -n unavailable) — daemon may fail to start"
+    fi
+
     log "installing config to $CONFIG_FILE"
     # Skip sudo when --skip-systemd is set AND we're already going to
     # write to a path under INSTALL_ROOT (which we own). Otherwise
@@ -333,8 +356,8 @@ uninstall() {
         log "removing $CONFIG_DIR"
         maybe_sudo rm -rf "$CONFIG_DIR"
     fi
-    log "NOTE: $WORK_DIR and $LOG_DIR left intact (they may contain runtime data + logs)."
-    log "Delete manually with: sudo rm -rf $WORK_DIR $LOG_DIR"
+    log "NOTE: $WORK_DIR, $LOG_DIR, and $AGENT_INSTALL_ROOT left intact (they may contain runtime data + logs)."
+    log "Delete manually with: sudo rm -rf $WORK_DIR $LOG_DIR $AGENT_INSTALL_ROOT"
 }
 
 # ---------------------------------------------------------------------------
@@ -345,11 +368,12 @@ print_summary() {
     cat <<EOF
 
 ========== install summary ==========
-install_root : $INSTALL_ROOT
-config_file  : $CONFIG_FILE
-work_dir     : $WORK_DIR
-log_dir      : $LOG_DIR
-systemd unit : $UNIT_NAME  ($([ "$WITH_SYSTEMD" -eq 1 ] && echo enabled || echo disabled))
+install_root     : $INSTALL_ROOT
+config_file      : $CONFIG_FILE
+work_dir         : $WORK_DIR
+log_dir          : $LOG_DIR
+agent_install_root: $AGENT_INSTALL_ROOT
+systemd unit     : $UNIT_NAME  ($([ "$WITH_SYSTEMD" -eq 1 ] && echo enabled || echo disabled))
 python venv  : $([ "$WITH_VENV" -eq 1 ] && echo "$INSTALL_ROOT/.venv" || echo "(system python)")
 =====================================
 
