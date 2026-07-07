@@ -68,7 +68,13 @@ NoNewPrivileges=false
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
-ReadWritePaths=/var/lib/agent-manager /var/log/agent-manager /opt/agent-manager-daemon /opt/myagent
+# /etc is in ReadWritePaths so the daemon can rewrite /etc/shadow
+# when a user changes their password via the web UI. /etc is otherwise
+# protected by ProtectSystem=strict (read-only bind mount); listing
+# it here re-grants write access. The daemon is itself a privileged
+# service that already has root + full caps, so the hardening loss
+# is small.
+ReadWritePaths=/var/lib/agent-manager /var/log/agent-manager /opt/agent-manager-daemon /opt/myagent /etc
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true
