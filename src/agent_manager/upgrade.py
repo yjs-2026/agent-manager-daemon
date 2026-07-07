@@ -610,8 +610,28 @@ class UpgradeManager:
 
 
 def build_registry(cfg: Config) -> JobRegistry:
+    """Create the on-disk :class:`JobRegistry`.
+
+    Raises:
+        OSError: if the work dir can't be created. We don't catch and
+            re-raise as a more specific error — the underlying errno
+            (EACCES for permission, ENOENT for missing parent) is what
+            the operator needs to see. We log the *configured* path
+            so the operator knows where to look.
+    """
     work_dir = Path(cfg.upgrade.work_dir)
-    work_dir.mkdir(parents=True, exist_ok=True)
+    logger.info("initialising job registry under %s", work_dir)
+    try:
+        work_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        # Add context before re-raising so the traceback tells the
+        # operator which knob in config.yaml is wrong.
+        raise OSError(
+            f"could not create upgrade.work_dir {str(work_dir)!r}: {exc}. "
+            f"Check that the parent directory exists and is writable "
+            f"by the user the daemon runs as (root via systemd). "
+            f"To move it, edit /etc/agent-manager/config.yaml."
+        ) from exc
     return JobRegistry(path=str(work_dir / "jobs.json"))
 
 

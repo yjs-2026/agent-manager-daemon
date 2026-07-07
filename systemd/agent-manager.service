@@ -18,6 +18,13 @@ ExecStart=/opt/agent-manager-daemon/.venv/bin/python -m agent_manager
 
 # Hardening: we need /etc/shadow + chpasswd + systemctl, so a tight
 # sandbox is impossible. Restrict what we *don't* need.
+#
+# MemoryDenyWriteExecute=false: CPython 3.12+ uses mmap(MAP_JIT) for
+# certain code paths (notably cryptography import-time JIT, but also
+# the in-process bytecode cache). MemoryDenyWriteExecute=true makes
+# the daemon exit with code 226/NAMESPACE on first mmap. The cost of
+# turning it off is small here because the daemon doesn't load
+# untrusted code at runtime.
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
@@ -31,10 +38,15 @@ RestrictNamespaces=true
 RestrictRealtime=true
 SystemCallArchitectures=native
 LockPersonality=true
-MemoryDenyWriteExecute=true
+MemoryDenyWriteExecute=false
 
 Restart=on-failure
 RestartSec=5s
+# Cap the restart loop: if the daemon dies 5 times in 60s, give up
+# and let `systemctl status` show the actual error instead of an
+# endless "activating (auto-restart)" cycle.
+StartLimitIntervalSec=60
+StartLimitBurst=5
 TimeoutStopSec=15
 
 [Install]

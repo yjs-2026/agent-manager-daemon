@@ -237,6 +237,12 @@ stage_files() {
     # Runtime dirs usually need root. If we're not root AND not skipping
     # systemd (where the unit runs as root anyway), just best-effort
     # try as the current user — non-fatal if it fails.
+    #
+    # We also pre-create cfg.upgrade.work_dir (the *parent* of which
+    # is what the daemon's `mkdir(parents=True)` call needs to already
+    # exist + own). Without this, a non-root invocation of
+    # `python -m agent_manager` would fail with EACCES trying to
+    # create .../work under a root-owned /var/lib/agent-manager.
     if [[ "$(id -u)" -eq 0 ]]; then
         run mkdir -p "$WORK_DIR" "$LOG_DIR"
         run chown -R "${RUN_AS_USER}:${RUN_AS_USER}" "$WORK_DIR" "$LOG_DIR"
