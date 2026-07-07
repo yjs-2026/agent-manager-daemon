@@ -36,14 +36,26 @@ ExecStart=/opt/agent-manager-daemon/.venv/bin/python -m agent_manager
 # turning it off is small here because the daemon doesn't load
 # untrusted code at runtime.
 #
-# No ReadWritePaths= needed: RuntimeDirectory=/StateDirectory=
-# /LogsDirectory= above make those paths rw implicitly, and the
-# install_root is mounted under /opt which ProtectSystem=strict leaves
-# writable by default.
+# ReadWritePaths is REQUIRED for paths we write to that aren't
+# covered by RuntimeDirectory=/StateDirectory=/LogsDirectory=:
+#   * /opt/myagent           — the agent's install_root
+#     (NOT covered by StateDirectory=agent-manager, which only
+#     creates /var/lib/agent-manager)
+#   * /opt/agent-manager-daemon — daemon source + venv live here
+#     and gunicorn workers need write access for bytecode cache
+# Without ReadWritePaths, ProtectSystem=strict makes these paths
+# read-only at mount-namespace setup time → exit-code 226/NAMESPACE
+# with "No such file or directory" even when the path DOES exist.
+#
+# /var/lib/agent-manager and /var/log/agent-manager are already
+# covered by StateDirectory=/LogsDirectory=agent-manager above
+# but listing them again in ReadWritePaths is harmless and
+# documents intent.
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
+ReadWritePaths=/var/lib/agent-manager /var/log/agent-manager /opt/agent-manager-daemon /opt/myagent
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true

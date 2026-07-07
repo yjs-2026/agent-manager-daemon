@@ -408,6 +408,13 @@ else
         install_system_python
     fi
     install_systemd_unit
+    # Post-install sanity: the systemd unit will refuse to start (226)
+    # if cfg.upgrade.install_root doesn't exist on disk. We pre-create
+    # it in stage_files(); verify here so the operator sees a clear
+    # "install incomplete" message instead of a cryptic NAMESPACE error.
+    if [[ "$DRY_RUN" -eq 0 && ! -d "$AGENT_INSTALL_ROOT" ]]; then
+        warn "post-install check: $AGENT_INSTALL_ROOT still missing — daemon will fail to start. Re-run as root or set --agent-install-root."
+    fi
     print_summary
 fi
 
