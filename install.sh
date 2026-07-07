@@ -186,17 +186,20 @@ create_venv() {
         log "creating venv with uv ($PYTHON_VERSION) at $UV_BIN"
         run mkdir -p "$INSTALL_ROOT"
         run "$UV_BIN" venv --python "$PYTHON_VERSION" "$venv"
-        log "installing project + deps into venv"
-        run "$UV_BIN" pip install --python "$venv/bin/python" -e "$SCRIPT_DIR"
+        log "installing project + deps into venv (non-editable)"
+        # Non-editable: copies src/agent_manager into site-packages so
+        # the daemon finds the module even if $INSTALL_ROOT is later
+        # moved or the .pth file paths go stale.
+        run "$UV_BIN" pip install --python "$venv/bin/python" "$SCRIPT_DIR"
     elif [[ -n "$PY_BIN" ]]; then
         log "creating venv with $PY_BIN ($PYTHON_VERSION)"
         run mkdir -p "$INSTALL_ROOT"
         if ! run "$PY_BIN" -m venv "$venv"; then
             die "venv creation failed — install ${PYTHON_VERSION}-venv (apt: python${PYTHON_VERSION}-venv), install uv first, or pass --system-python"
         fi
-        log "installing project + deps into venv"
+        log "installing project + deps into venv (non-editable)"
         run "$venv/bin/pip" install --upgrade pip
-        run "$venv/bin/pip" install -e "$SCRIPT_DIR"
+        run "$venv/bin/pip" install "$SCRIPT_DIR"
     else
         die "neither uv nor python${PYTHON_VERSION} found on this host; install one of them and re-run"
     fi
@@ -207,7 +210,7 @@ install_system_python() {
     log "using system python at $PY_BIN (no venv)"
     "$PY_BIN" -c "import sys; assert sys.version_info[:2] == (3,12), 'need 3.12, got '+sys.version" \
         || die "system python is not 3.12 — drop --system-python and use a venv"
-    run "$PY_BIN" -m pip install --break-system-packages -e "$SCRIPT_DIR"
+    run "$PY_BIN" -m pip install --break-system-packages "$SCRIPT_DIR"
 }
 
 # ---------------------------------------------------------------------------
