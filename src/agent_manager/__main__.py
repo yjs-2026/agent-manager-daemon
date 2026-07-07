@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import datetime as _dt
+import ipaddress
+import os
 import ssl
 import sys
+from pathlib import Path
 
 from .app import create_app
 from .auth import ensure_root
@@ -47,6 +51,69 @@ def _build_ssl_context(cfg: Config) -> ssl.SSLContext | str | tuple[str, str] | 
         return (tls.certfile, tls.keyfile)
 
     raise SystemExit(f"unknown tls.mode: {tls.mode!r}")
+
+
+def _generate_adhoc_cert(work_dir: str = "/var/lib/agent-manager"):
+    """Generate a one-shot self-signed cert for tls.mode=adhoc + gunicorn.
+
+    Gunicorn accepts only ``--certfile`` + ``--keyfile`` (no inline / magic
+    adhoc), so when the config says ``adhoc`` we generate a fresh cert on
+    disk and point gunicorn at it. The cert is short-lived (24h); if the
+    daemon runs longer than that the browser will warn on the next visit
+    and we re-generate on restart.
+
+    Returns ``(cert_path, key_path)``.
+    """
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.x509.oid import NameOID
+
+    os.makedirs(work_dir, exist_ok=True)
+    cert_path = os.path.join(work_dir, "adhoc-cert.pem")
+    key_path = os.path.join(work_dir, "adhoc-key.pem")
+
+    # If both files already exist (e.g. daemon was just restarted a few
+    # seconds ago), skip regeneration. 24h is plenty for dev / smoke-test.
+    if os.path.isfile(cert_path) and os.path.isfile(key_path):
+        age = _dt.datetime.now().timestamp() - os.path.getmtime(cert_path)
+        if age < 86400:
+            return cert_path, key_path
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    subject = issuer = x509.Name([
+        x509.NameAttribute(NameOID.COMMON_NAME, "agent-manager-daemon (adhoc)"),
+    ])
+    now = _dt.datetime.now(_dt.timezone.utc)
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(issuer)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - _dt.timedelta(minutes=5))
+        .not_valid_after(now + _dt.timedelta(hours=24))
+        .add_extension(
+            x509.SubjectAlternativeName([
+                x509.DNSName("localhost"),
+                x509.DNSName("agent-manager-daemon"),
+                x509.IPAddress(ipaddress.IPv4Address("127.0.0.1")),
+                x509.IPAddress(ipaddress.IPv6Address("::1")),
+            ]),
+            critical=False,
+        )
+        .sign(key, hashes.SHA256())
+    )
+    with open(cert_path, "wb") as f:
+        f.write(cert.public_bytes(serialization.Encoding.PEM))
+    with open(key_path, "wb") as f:
+        f.write(key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.TraditionalOpenSSL,
+            encryption_algorithm=serialization.NoEncryption(),
+        ))
+    os.chmod(key_path, 0o600)
+    return cert_path, key_path
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -140,6 +207,19 @@ def main(argv: list[str] | None = None) -> int:
 
     # Production path: hand off to gunicorn.
     from gunicorn.app.wsgiapp import run as gunicorn_run
+
+    # gunicorn's default control-socket directory is $HOME/.gunicorn.
+    # Under systemd with ProtectHome=true that's a read-only bind
+    # mount and gunicorn fails with "[Errno 30] Read-only file system".
+    # Redirect $HOME to a writable path under our StateDirectory.
+    # Default to the parent of cfg.upgrade.work_dir (e.g.
+    # /var/lib/agent-manager), or honor an explicit override.
+    gunicorn_home = os.environ.get(
+        "AGENT_MANAGER_STATE_DIR",
+        str(Path(cfg.upgrade.work_dir).parent),
+    )
+    os.environ["HOME"] = gunicorn_home
+
     sys.argv = [
         "gunicorn",
         "--bind", f"{host}:{port}",
@@ -153,6 +233,12 @@ def main(argv: list[str] | None = None) -> int:
         # gunicorn understands --certfile + --keyfile for HTTPS.
         certfile, keyfile = ssl_ctx
         sys.argv += ["--certfile", certfile, "--keyfile", keyfile]
+        sys.argv += ["--ssl-version", cfg.tls.min_version]
+    elif ssl_ctx == "adhoc":
+        # gunicorn has no 'adhoc' magic — we generate a self-signed cert
+        # on the fly under $HOME and pass it explicitly.
+        cert_path, key_path = _generate_adhoc_cert(work_dir=gunicorn_home)
+        sys.argv += ["--certfile", cert_path, "--keyfile", key_path]
         sys.argv += ["--ssl-version", cfg.tls.min_version]
     gunicorn_run()
     return 0
