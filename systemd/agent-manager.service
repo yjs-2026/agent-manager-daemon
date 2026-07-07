@@ -76,6 +76,18 @@ RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 RestrictNamespaces=true
 RestrictRealtime=true
 SystemCallArchitectures=native
+# SystemCallFilter= (empty) disables systemd's default syscall
+# blacklist. The default (~) blocks groups like @clock, @debug, etc.,
+# but in our case it also breaks chpasswd: chpasswd delegates the
+# actual /etc/shadow write to /sbin/unix_chkpwd, which calls a
+# syscall (chown on the new shadow file) that the default filter
+# doesn't allow, causing pam_chauthtok() to fail with
+# "Authentication token manipulation error".
+#
+# The daemon is itself a privileged service that talks to PAM, the
+# shadow suite, systemctl, etc. — the syscalls we need are diverse
+# enough that the default blacklist is more risk than benefit.
+SystemCallFilter=
 LockPersonality=true
 MemoryDenyWriteExecute=false
 
