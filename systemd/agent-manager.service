@@ -42,6 +42,13 @@ ExecStart=/opt/agent-manager-daemon/.venv/bin/agent-manager
 # turning it off is small here because the daemon doesn't load
 # untrusted code at runtime.
 #
+# NoNewPrivileges=false: chpasswd delegates the actual shadow write
+# to /sbin/unix_chkpwd, which is setgid shadow. NoNewPrivileges=true
+# disables setuid/setgid bit handling, so chpasswd can't reach the
+# shadow file and pam_chauthtok() returns
+# "Authentication token manipulation error". The daemon itself runs
+# as root from the start, so this isn't a privilege escalation risk.
+#
 # ReadWritePaths is REQUIRED for paths we write to that aren't
 # covered by RuntimeDirectory=/StateDirectory=/LogsDirectory=:
 #   * /opt/myagent           — the agent's install_root
@@ -57,7 +64,7 @@ ExecStart=/opt/agent-manager-daemon/.venv/bin/agent-manager
 # covered by StateDirectory=/LogsDirectory=agent-manager above
 # but listing them again in ReadWritePaths is harmless and
 # documents intent.
-NoNewPrivileges=true
+NoNewPrivileges=false
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
