@@ -44,23 +44,58 @@ README.en.md           英文版（与中文内容一一对应）
 
 ## 安装
 
+提供了一键脚本 `install.sh`：
+
 ```bash
-# 需要 Python 3.12（uv 找不到会自动下载）
+# 生产安装（推荐）
+sudo ./install.sh
+
+# 看清楚会跑什么
+./install.sh -n
+
+# 卸载（停 unit + 清掉它装的所有文件，但保留运行时数据）
+sudo ./install.sh -u
+
+# 自定义安装路径
+sudo ./install.sh -p /srv/agent-manager-daemon
+
+# 只 stage 文件、不动 systemd（适合容器/CI）
+./install.sh --skip-systemd -p /tmp/test
+
+# 用系统 python 跳过 venv（不推荐，除非空间紧张）
+sudo ./install.sh --system-python
+
+# 重新覆盖默认 config.yaml（默认会保护已有 config 不被覆盖）
+sudo ./install.sh --force-config
+```
+
+`install.sh` 会：
+
+1. 预检查 Python 3.12 / uv / systemd / root
+2. 在 `<prefix>/.venv` 创建虚拟环境并装好依赖
+3. 把项目源同步到 `<prefix>/`
+4. 把配置复制到 `/etc/agent-manager/config.yaml`（mode 0600）
+5. 创建运行时目录 `/var/lib/agent-manager`、`/var/log/agent-manager`
+6. 安装 systemd unit 并 enable + start
+
+守护进程默认绑定 **`0.0.0.0:8443`**，开启 **HTTPS**（`tls.mode: adhoc` —— 启动时生成自签证书，浏览器每次会弹"不安全"警告）。生产环境请切到 `tls.mode: explicit` 并把 `certfile`/`keyfile` 指向 Let's Encrypt 或内网 CA 签发的证书。详细说明见 `config.yaml` 注释和下面的 *安全说明*。
+
+### 手动安装（不走脚本）
+
+如果不想用脚本，照下面装：
+
+```bash
 uv venv --python 3.12
 uv pip install -e ".[dev]"
 
-# 复制配置并按本机情况修改
 sudo install -d /etc/agent-manager
 sudo cp config.yaml /etc/agent-manager/config.yaml
 sudoedit /etc/agent-manager/config.yaml
 
-# 安装 systemd unit
 sudo install -m 0644 systemd/agent-manager.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now agent-manager
 ```
-
-守护进程默认绑定 **`0.0.0.0:8443`**，开启 **HTTPS**（`tls.mode: adhoc` —— 启动时生成自签证书，浏览器每次会弹"不安全"警告）。生产环境请切到 `tls.mode: explicit` 并把 `certfile`/`keyfile` 指向 Let's Encrypt 或内网 CA 签发的证书。详细说明见 `config.yaml` 注释和下面的 *安全说明*。
 
 ## 配置
 
